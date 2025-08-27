@@ -3,18 +3,17 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 const userSchema = new mongoose.Schema({
-  username: {
+  // Wallet-based authentication
+  walletAddress: {
     type: String,
-    required: [true, 'Username is required'],
-    unique: true,
+    required: [true, 'Wallet address is required'],
     trim: true,
-    minlength: [3, 'Username must be at least 3 characters'],
-    maxlength: [30, 'Username cannot exceed 30 characters'],
+    lowercase: true,
   },
+  // Optional email for notifications
   email: {
     type: String,
-    required: [true, 'Email is required'],
-    unique: true,
+    sparse: true,
     lowercase: true,
     trim: true,
     match: [
@@ -22,37 +21,125 @@ const userSchema = new mongoose.Schema({
       'Please enter a valid email',
     ],
   },
-  password: {
-    type: String,
-    required: [true, 'Password is required'],
-    minlength: [6, 'Password must be at least 6 characters'],
-    select: false, // Don't include password in queries by default
-  },
-  firstName: {
+  // Display name (optional)
+  displayName: {
     type: String,
     trim: true,
-    maxlength: [50, 'First name cannot exceed 50 characters'],
+    maxlength: [50, 'Display name cannot exceed 50 characters'],
   },
-  lastName: {
-    type: String,
-    trim: true,
-    maxlength: [50, 'Last name cannot exceed 50 characters'],
-  },
+  // Profile picture URL
   avatar: {
     type: String,
     default: '',
   },
+  // User role
   role: {
     type: String,
     enum: ['user', 'admin'],
     default: 'user',
   },
+  // Account status
   isActive: {
     type: Boolean,
     default: true,
   },
+  // Last login timestamp
   lastLogin: {
     type: Date,
+  },
+  // Referral system
+  referralCode: {
+    type: String,
+    required: false, // Optional, will be generated if not provided
+    sparse: true, // Allow null/undefined values
+  },
+  referredBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
+  referralCount: {
+    type: Number,
+    default: 0,
+  },
+  totalReferralEarnings: {
+    type: Number,
+    default: 0,
+  },
+  referredUsers: [{
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    walletAddress: String,
+    joinedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    earnedPoints: {
+      type: Number,
+      default: 100, // 100 points per referral
+    },
+  }],
+  // Points system
+  totalPoints: {
+    type: Number,
+    default: 0,
+  },
+  pointsHistory: [{
+    amount: {
+      type: Number,
+      required: true,
+    },
+    source: {
+      type: String,
+      required: true,
+      enum: ['task', 'referral', 'daily_spinner', 'admin'],
+    },
+    description: {
+      type: String,
+      required: true,
+    },
+    taskId: {
+      type: String,
+    },
+    timestamp: {
+      type: Date,
+      default: Date.now,
+    },
+  }],
+  // Task completion tracking
+  completedTasks: [{
+    taskId: {
+      type: String,
+      required: true,
+    },
+    completions: {
+      type: Number,
+      default: 0,
+    },
+    lastCompleted: {
+      type: Date,
+      default: Date.now,
+    },
+    completed: {
+      type: Boolean,
+      default: false,
+    },
+  }],
+  // Daily spinner tracking
+  lastSpinnerSpin: {
+    type: Date,
+  },
+  spinnerSpinsToday: {
+    type: Number,
+    default: 0,
+  },
+  // Tier system
+  currentTier: {
+    type: String,
+    enum: ['Newcomer', 'Space Explorer', 'Cosmic Creator'],
+    default: 'Newcomer',
   },
 }, {
   timestamps: true,
@@ -60,59 +147,155 @@ const userSchema = new mongoose.Schema({
   toObject: { virtuals: true },
 });
 
-// Virtual for full name
-userSchema.virtual('fullName').get(function() {
-  return `${this.firstName || ''} ${this.lastName || ''}`.trim();
+// Virtual for wallet address display (shortened)
+userSchema.virtual('walletDisplay').get(function() {
+  if (!this.walletAddress) return '';
+  return `${this.walletAddress.slice(0, 6)}...${this.walletAddress.slice(-4)}`;
 });
 
-// Index for better query performance
-userSchema.index({ email: 1 });
-userSchema.index({ username: 1 });
+// Virtual for full name
+userSchema.virtual('fullName').get(function() {
+  return this.displayName || this.walletDisplay;
+});
 
-// Pre-save middleware to hash password
+// Indexes for better query performance
+userSchema.index({ walletAddress: 1 }, { unique: true });
+userSchema.index({ email: 1 }, { sparse: true });
+userSchema.index({ referralCode: 1 }, { sparse: true });
+userSchema.index({ referredBy: 1 });
+userSchema.index({ totalPoints: -1 });
+
+// Pre-save middleware to generate referral code if not exists
 userSchema.pre('save', async function(next) {
-  // Only hash the password if it has been modified (or is new)
-  if (!this.isModified('password')) return next();
-
   try {
-    // Hash password with cost of 12
-    const salt = await bcrypt.genSalt(12);
-    this.password = await bcrypt.hash(this.password, salt);
+    if (!this.referralCode && this.walletAddress) {
+      this.referralCode = this.generateReferralCode();
+    }
     next();
   } catch (error) {
     next(error);
   }
 });
 
-// Instance method to check password
-userSchema.methods.matchPassword = async function(enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
+// Instance method to generate referral code (using wallet address)
+userSchema.methods.generateReferralCode = function() {
+  // Use wallet address as referral code (shortened)
+  if (!this.walletAddress) {
+    console.error('No wallet address available for referral code generation');
+    return 'DEFAULT';
+  }
+  return this.walletAddress.slice(0, 8).toUpperCase();
 };
 
 // Instance method to generate JWT token
 userSchema.methods.generateAuthToken = function() {
   return jwt.sign(
-    { id: this._id, email: this.email, role: this.role },
+    { 
+      id: this._id, 
+      walletAddress: this.walletAddress, 
+      role: this.role 
+    },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
 };
 
-// Static method to find user by credentials
-userSchema.statics.findByCredentials = async function(email, password) {
-  const user = await this.findOne({ email }).select('+password');
+// Instance method to add points
+userSchema.methods.addPoints = function(amount, source, description, taskId = null) {
+  this.totalPoints += amount;
+  this.pointsHistory.push({
+    amount,
+    source,
+    description,
+    taskId,
+    timestamp: new Date(),
+  });
   
-  if (!user) {
-    throw new Error('Invalid credentials');
-  }
-
-  const isMatch = await user.matchPassword(password);
+  // Update tier based on points
+  this.updateTier();
   
-  if (!isMatch) {
-    throw new Error('Invalid credentials');
-  }
+  return this.save();
+};
 
-  return user;
+// Instance method to update tier
+userSchema.methods.updateTier = function() {
+  if (this.totalPoints >= 60) {
+    this.currentTier = 'Cosmic Creator';
+  } else if (this.totalPoints >= 30) {
+    this.currentTier = 'Space Explorer';
+  } else {
+    this.currentTier = 'Newcomer';
+  }
+};
+
+// Instance method to complete task
+userSchema.methods.completeTask = function(taskId, points, description) {
+  const existingTask = this.completedTasks.find(task => task.taskId === taskId);
+  
+  if (existingTask) {
+    existingTask.completions += 1;
+    existingTask.lastCompleted = new Date();
+    // Mark as completed if reached max completions
+    if (existingTask.completions >= this.getTaskMaxCompletions(taskId)) {
+      existingTask.completed = true;
+    }
+  } else {
+    this.completedTasks.push({
+      taskId,
+      completions: 1,
+      lastCompleted: new Date(),
+      completed: false,
+    });
+  }
+  
+  // Add points
+  this.addPoints(points, 'task', description, taskId);
+  
+  return this.save();
+};
+
+// Helper method to get task max completions (this would need to be implemented)
+userSchema.methods.getTaskMaxCompletions = function(taskId) {
+  // This is a placeholder - in a real implementation, you'd fetch from Task model
+  // For now, we'll use default values based on task type
+  const taskDefaults = {
+    'follow': 1,
+    'like_rt': 1,
+    'comment': 1,
+    'quote_tweet': 5,
+    'original_tweet': 5,
+    'x_space': 2,
+    'referral_bonus': 999,
+    'daily_spinner': 3,
+  };
+  return taskDefaults[taskId] || 1;
+};
+
+// Instance method to add referral
+userSchema.methods.addReferral = function(referredUserId, referredWalletAddress) {
+  this.referralCount += 1;
+  this.totalReferralEarnings += 100; // 100 points per referral
+  
+  // Add to referred users list
+  this.referredUsers.push({
+    userId: referredUserId,
+    walletAddress: referredWalletAddress,
+    joinedAt: new Date(),
+    earnedPoints: 100,
+  });
+  
+  this.addPoints(100, 'referral', `Referral bonus for user ${referredWalletAddress}`);
+  return this.save();
+};
+
+// Static method to find user by wallet address
+userSchema.statics.findByWalletAddress = function(walletAddress) {
+  return this.findOne({ walletAddress: walletAddress.toLowerCase() });
+};
+
+// Static method to find user by referral code
+userSchema.statics.findByReferralCode = function(referralCode) {
+  return this.findOne({ referralCode: referralCode.toUpperCase() });
 };
 
 module.exports = mongoose.model('User', userSchema);

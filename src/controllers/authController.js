@@ -1,39 +1,71 @@
 const User = require('../models/User');
+const Referral = require('../models/Referral');
 
-// @desc    Register user
-// @route   POST /api/auth/register
+// @desc    Connect wallet and authenticate user
+// @route   POST /api/auth/connect-wallet
 // @access  Public
-const register = async (req, res, next) => {
+const connectWallet = async (req, res, next) => {
   try {
-    const { username, email, password, firstName, lastName } = req.body;
+    const { walletAddress, referralCode, displayName, email } = req.body;
 
-    // Check if user already exists
-    const existingUser = await User.findOne({
-      $or: [{ email }, { username }],
-    });
-
-    if (existingUser) {
+    if (!walletAddress) {
       return res.status(400).json({
         status: 'error',
-        message: 'User with this email or username already exists',
+        message: 'Wallet address is required',
       });
     }
 
-    // Create user
-    const user = await User.create({
-      username,
+    // Check if user already exists
+    let user = await User.findByWalletAddress(walletAddress);
+
+    if (user) {
+      // User exists, update last login
+      user.lastLogin = new Date();
+      await user.save();
+
+      // Generate token
+      const token = user.generateAuthToken();
+
+      return res.json({
+        status: 'success',
+        message: 'Wallet connected successfully',
+        data: {
+          user: {
+            id: user._id,
+            walletAddress: user.walletAddress,
+            displayName: user.displayName,
+            email: user.email,
+            avatar: user.avatar,
+            role: user.role,
+            totalPoints: user.totalPoints,
+            currentTier: user.currentTier,
+            referralCode: user.referralCode,
+            referralCount: user.referralCount,
+            totalReferralEarnings: user.totalReferralEarnings,
+          },
+          token,
+        },
+      });
+    }
+
+    // Create new user
+    user = new User({
+      walletAddress: walletAddress.toLowerCase(),
+      displayName,
       email,
-      password,
-      firstName,
-      lastName,
     });
+
+    // Generate referral code after user creation
+    user.referralCode = user.generateReferralCode();
+    await user.save();
+
+    // Handle referral if provided
+    if (referralCode) {
+      await handleReferral(user, referralCode, req);
+    }
 
     // Generate token
     const token = user.generateAuthToken();
-
-    // Update last login
-    user.lastLogin = new Date();
-    await user.save();
 
     res.status(201).json({
       status: 'success',
@@ -41,13 +73,16 @@ const register = async (req, res, next) => {
       data: {
         user: {
           id: user._id,
-          username: user.username,
+          walletAddress: user.walletAddress,
+          displayName: user.displayName,
           email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          fullName: user.fullName,
-          role: user.role,
           avatar: user.avatar,
+          role: user.role,
+          totalPoints: user.totalPoints,
+          currentTier: user.currentTier,
+          referralCode: user.referralCode,
+          referralCount: user.referralCount,
+          totalReferralEarnings: user.totalReferralEarnings,
         },
         token,
       },
@@ -57,52 +92,45 @@ const register = async (req, res, next) => {
   }
 };
 
-// @desc    Login user
-// @route   POST /api/auth/login
-// @access  Public
-const login = async (req, res, next) => {
+// @desc    Handle referral logic
+// @access  Private
+const handleReferral = async (newUser, referralCode, req) => {
   try {
-    const { email, password } = req.body;
-
-    // Find user by credentials
-    const user = await User.findByCredentials(email, password);
-
-    if (!user.isActive) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Account is deactivated',
-      });
+    // Find referrer by referral code
+    const referrer = await User.findByReferralCode(referralCode);
+    
+    if (!referrer || referrer._id.equals(newUser._id)) {
+      return; // Invalid referral code or self-referral
     }
 
-    // Generate token
-    const token = user.generateAuthToken();
+    // Create referral record
+    const referral = await Referral.createReferral(
+      referrer._id,
+      newUser._id,
+      referralCode,
+      'link',
+      {
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+        referrer: req.get('Referrer'),
+      }
+    );
 
-    // Update last login
-    user.lastLogin = new Date();
-    await user.save();
+    // Update user with referral info
+    newUser.referredBy = referrer._id;
+    await newUser.save();
 
-    res.json({
-      status: 'success',
-      message: 'Login successful',
-      data: {
-        user: {
-          id: user._id,
-          username: user.username,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          fullName: user.fullName,
-          role: user.role,
-          avatar: user.avatar,
-        },
-        token,
-      },
-    });
+    // Add bonus points to referred user
+    await newUser.addPoints(50, 'referral', `Welcome bonus for using referral code ${referralCode}`);
+
+    // Add referral bonus to referrer
+    await referrer.addReferral(newUser._id, newUser.walletAddress);
+
+    // Activate the referral
+    await referral.activate();
+
   } catch (error) {
-    res.status(401).json({
-      status: 'error',
-      message: 'Invalid credentials',
-    });
+    console.error('Error handling referral:', error);
   }
 };
 
@@ -118,13 +146,16 @@ const getProfile = async (req, res, next) => {
       data: {
         user: {
           id: user._id,
-          username: user.username,
+          walletAddress: user.walletAddress,
+          displayName: user.displayName,
           email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          fullName: user.fullName,
-          role: user.role,
           avatar: user.avatar,
+          role: user.role,
+          totalPoints: user.totalPoints,
+          currentTier: user.currentTier,
+          referralCode: user.referralCode,
+          referralCount: user.referralCount,
+          totalReferralEarnings: user.totalReferralEarnings,
           isActive: user.isActive,
           lastLogin: user.lastLogin,
           createdAt: user.createdAt,
@@ -142,12 +173,12 @@ const getProfile = async (req, res, next) => {
 // @access  Private
 const updateProfile = async (req, res, next) => {
   try {
-    const { firstName, lastName, avatar } = req.body;
+    const { displayName, email, avatar } = req.body;
 
     const user = await User.findById(req.user.id);
 
-    if (firstName) user.firstName = firstName;
-    if (lastName) user.lastName = lastName;
+    if (displayName) user.displayName = displayName;
+    if (email) user.email = email;
     if (avatar) user.avatar = avatar;
 
     await user.save();
@@ -158,13 +189,16 @@ const updateProfile = async (req, res, next) => {
       data: {
         user: {
           id: user._id,
-          username: user.username,
+          walletAddress: user.walletAddress,
+          displayName: user.displayName,
           email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          fullName: user.fullName,
-          role: user.role,
           avatar: user.avatar,
+          role: user.role,
+          totalPoints: user.totalPoints,
+          currentTier: user.currentTier,
+          referralCode: user.referralCode,
+          referralCount: user.referralCount,
+          totalReferralEarnings: user.totalReferralEarnings,
         },
       },
     });
@@ -173,31 +207,54 @@ const updateProfile = async (req, res, next) => {
   }
 };
 
-// @desc    Change password
-// @route   PUT /api/auth/change-password
+// @desc    Get user points history
+// @route   GET /api/auth/points-history
 // @access  Private
-const changePassword = async (req, res, next) => {
+const getPointsHistory = async (req, res, next) => {
   try {
-    const { currentPassword, newPassword } = req.body;
+    const { page = 1, limit = 20 } = req.query;
+    const user = await User.findById(req.user.id);
 
-    const user = await User.findById(req.user.id).select('+password');
+    const startIndex = (page - 1) * limit;
+    const endIndex = page * limit;
 
-    // Check current password
-    const isMatch = await user.matchPassword(currentPassword);
-    if (!isMatch) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Current password is incorrect',
-      });
-    }
+    const pointsHistory = user.pointsHistory
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .slice(startIndex, endIndex);
 
-    // Update password
-    user.password = newPassword;
-    await user.save();
+    const total = user.pointsHistory.length;
 
     res.json({
       status: 'success',
-      message: 'Password changed successfully',
+      data: {
+        pointsHistory,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNextPage: endIndex < total,
+          hasPrevPage: page > 1,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get user completed tasks
+// @route   GET /api/auth/completed-tasks
+// @access  Private
+const getCompletedTasks = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    res.json({
+      status: 'success',
+      data: {
+        completedTasks: user.completedTasks,
+      },
     });
   } catch (error) {
     next(error);
@@ -205,9 +262,9 @@ const changePassword = async (req, res, next) => {
 };
 
 module.exports = {
-  register,
-  login,
+  connectWallet,
   getProfile,
   updateProfile,
-  changePassword,
+  getPointsHistory,
+  getCompletedTasks,
 };

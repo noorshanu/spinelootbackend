@@ -3,83 +3,69 @@ const { body } = require('express-validator');
 const { protect } = require('../middleware/auth');
 const validate = require('../middleware/validate');
 const {
-  register,
-  login,
+  connectWallet,
   getProfile,
   updateProfile,
-  changePassword,
+  getPointsHistory,
+  getCompletedTasks,
 } = require('../controllers/authController');
 
 const router = express.Router();
 
 // Validation rules
-const registerValidation = [
-  body('username')
-    .trim()
-    .isLength({ min: 3, max: 30 })
-    .withMessage('Username must be between 3 and 30 characters')
-    .matches(/^[a-zA-Z0-9_]+$/)
-    .withMessage('Username can only contain letters, numbers, and underscores'),
-  body('email')
-    .isEmail()
-    .normalizeEmail()
-    .withMessage('Please provide a valid email'),
-  body('password')
-    .isLength({ min: 6 })
-    .withMessage('Password must be at least 6 characters long'),
-  body('firstName')
-    .optional()
-    .trim()
-    .isLength({ max: 50 })
-    .withMessage('First name cannot exceed 50 characters'),
-  body('lastName')
-    .optional()
-    .trim()
-    .isLength({ max: 50 })
-    .withMessage('Last name cannot exceed 50 characters'),
-];
-
-const loginValidation = [
-  body('email')
-    .isEmail()
-    .normalizeEmail()
-    .withMessage('Please provide a valid email'),
-  body('password')
+const connectWalletValidation = [
+  body('walletAddress')
     .notEmpty()
-    .withMessage('Password is required'),
+    .withMessage('Wallet address is required')
+    .isLength({ min: 32, max: 50 })
+    .withMessage('Invalid wallet address format'),
+  body('displayName')
+    .optional()
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage('Display name cannot exceed 50 characters'),
+  body('email')
+    .optional()
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('referralCode')
+    .optional()
+    .trim()
+    .custom((value) => {
+      if (value === null || value === undefined || value === '') {
+        return true; // Allow null/undefined/empty values
+      }
+      if (value.length < 3 || value.length > 20) {
+        throw new Error('Referral code must be between 3 and 20 characters');
+      }
+      return true;
+    })
+    .withMessage('Referral code must be between 3 and 20 characters'),
 ];
 
 const updateProfileValidation = [
-  body('firstName')
+  body('displayName')
     .optional()
     .trim()
     .isLength({ max: 50 })
-    .withMessage('First name cannot exceed 50 characters'),
-  body('lastName')
+    .withMessage('Display name cannot exceed 50 characters'),
+  body('email')
     .optional()
-    .trim()
-    .isLength({ max: 50 })
-    .withMessage('Last name cannot exceed 50 characters'),
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
   body('avatar')
     .optional()
     .isURL()
     .withMessage('Avatar must be a valid URL'),
 ];
 
-const changePasswordValidation = [
-  body('currentPassword')
-    .notEmpty()
-    .withMessage('Current password is required'),
-  body('newPassword')
-    .isLength({ min: 6 })
-    .withMessage('New password must be at least 6 characters long'),
-];
-
 // Routes
-router.post('/register', registerValidation, validate, register);
-router.post('/login', loginValidation, validate, login);
+router.post('/connect-wallet', connectWalletValidation, validate, connectWallet);
 router.get('/profile', protect, getProfile);
 router.put('/profile', protect, updateProfileValidation, validate, updateProfile);
-router.put('/change-password', protect, changePasswordValidation, validate, changePassword);
+router.get('/points-history', protect, getPointsHistory);
+router.get('/completed-tasks', protect, getCompletedTasks);
 
 module.exports = router;

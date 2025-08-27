@@ -1,12 +1,16 @@
-# Spineloot Backend
+# SpinLoot Airdrop Dashboard Backend
 
-A professional Node.js backend with MongoDB, featuring clean architecture, security best practices, and comprehensive error handling.
+A professional Node.js backend with MongoDB for the SpinLoot airdrop dashboard, featuring wallet-based authentication, points system, referral program, and comprehensive task management.
 
 ## Features
 
 - 🚀 **Express.js** - Fast, unopinionated web framework
 - 🍃 **MongoDB** - NoSQL database with Mongoose ODM
-- 🔐 **JWT Authentication** - Secure token-based authentication
+- 🔐 **Wallet Authentication** - Secure wallet-based authentication
+- 🎯 **Points System** - Comprehensive points tracking and tier system
+- 👥 **Referral Program** - Complete referral system with tracking
+- 🎰 **Daily Spinner** - Random rewards system with daily limits
+- 📋 **Task Management** - Airdrop tasks with completion tracking
 - 🛡️ **Security Middleware** - Helmet, CORS, rate limiting, XSS protection
 - 📝 **Input Validation** - Express-validator for request validation
 - 🧪 **Testing** - Jest testing framework
@@ -69,26 +73,49 @@ src/
 - `npm test` - Run tests
 - `npm run lint` - Run ESLint
 - `npm run lint:fix` - Fix ESLint issues
+- `npm run seed:tasks` - Seed database with default tasks
 
 ## API Endpoints
 
 ### Health Check
 - `GET /api/health` - Server health status
 
-### Authentication (Example)
-- `POST /api/auth/register` - User registration
-- `POST /api/auth/login` - User login
+### Authentication
+- `POST /api/auth/connect-wallet` - Connect wallet and authenticate
 - `GET /api/auth/profile` - Get user profile (protected)
+- `PUT /api/auth/profile` - Update user profile (protected)
+- `GET /api/auth/points-history` - Get points history (protected)
+
+### Tasks
+- `GET /api/tasks` - Get all active tasks
+- `GET /api/tasks/:taskId` - Get specific task
+- `POST /api/tasks/:taskId/complete` - Complete task (protected)
+- `GET /api/tasks/progress` - Get user's task progress (protected)
+- `GET /api/tasks/stats` - Get task statistics (protected)
+
+### Referrals
+- `GET /api/referrals/info` - Get referral info (protected)
+- `GET /api/referrals/list` - Get referrals list (protected)
+- `GET /api/referrals/stats` - Get referral statistics (protected)
+- `POST /api/referrals/validate` - Validate referral code
+- `GET /api/referrals/leaderboard` - Get referral leaderboard
+- `GET /api/referrals/rewards` - Get referral rewards (protected)
+
+### Daily Spinner
+- `POST /api/spinner/spin` - Spin daily spinner (protected)
+- `GET /api/spinner/status` - Get spinner status (protected)
+- `GET /api/spinner/history` - Get spinner history (protected)
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `NODE_ENV` | Environment mode | `development` |
-| `PORT` | Server port | `3000` |
+| `PORT` | Server port | `4000` |
 | `MONGODB_URI` | MongoDB connection string | `mongodb://localhost:27017/spineloot` |
 | `JWT_SECRET` | JWT signing secret | Required |
 | `JWT_EXPIRES_IN` | JWT expiration time | `7d` |
+| `FRONTEND_URL` | Frontend URL for referral links | `http://localhost:3000` |
 
 ## Security Features
 
@@ -97,7 +124,21 @@ src/
 - **Rate Limiting** - API rate limiting
 - **Input Sanitization** - MongoDB query sanitization
 - **XSS Protection** - Cross-site scripting protection
-- **Password Hashing** - bcryptjs for password security
+- **Wallet Authentication** - Secure wallet-based authentication
+
+## Points & Tier System
+
+- **Newcomer**: 0-29 points
+- **Space Explorer**: 30-59 points  
+- **Cosmic Creator**: 60+ points
+
+## Referral System
+
+- **Referrer Bonus**: 100 points per successful referral
+- **Referred Bonus**: 50 points welcome bonus
+- **Milestone Rewards**: Bonus points at 5, 10, 25, 50, 100 referrals
+- **Manual Referrals**: Support for manual referral code entry
+- **Referral ID**: Uses wallet address (first 8 characters)
 
 ## Contributing
 
